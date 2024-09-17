@@ -21,6 +21,9 @@ module.exports = async (env, options) => {
       taskpane: ["./src/taskpane/taskpane.ts", "./src/taskpane/taskpane.html"],
       commands: "./src/commands/commands.ts",
     },
+    externals: {
+      sharp: "commonjs sharp",
+    },
     output: {
       clean: true,
     },
