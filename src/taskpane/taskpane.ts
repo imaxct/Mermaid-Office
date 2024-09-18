@@ -6,14 +6,65 @@
 /* global document, Office, Word */
 
 import mermaid from "mermaid";
-import { toBase64 } from "js-base64";
+import { toBase64, toUint8Array, fromUint8Array } from "js-base64";
+import { metadataPNG } from "./metadataPNG";
 
-Office.onReady((info) => {
+let eventContexts = [];
+
+Office.onReady(async (info) => {
   if (info.host === Office.HostType.Word) {
+    document.getElementById("errors").innerText = "";
     mermaid.initialize({ startOnLoad: false });
-    document.getElementById("insert-image").onclick = run;
+    document.getElementById("insert-image").onclick = GenerateImage;
+    document.getElementById("addEvent").onclick = RegisterEventListener;
+    await RegisterEventListener();
   }
 });
+
+async function RegisterEventListener() {
+  await Word.run(async (context) => {
+    const contentControls = context.document.contentControls;
+    contentControls.load("items");
+    await context.sync();
+    if (contentControls.items.length === 0) {
+      console.log("Zero items");
+      return;
+    }
+
+    for (let i = 0; i < contentControls.items.length; i++) {
+      eventContexts[i] = contentControls.items[i].onSelectionChanged.add(imageSelectionChange);
+    }
+
+    await context.sync();
+  });
+}
+
+async function imageSelectionChange(event: Word.ContentControlSelectionChangedEventArgs) {
+  await Word.run(async (context) => {
+    console.log(event);
+  });
+}
+
+export async function GenerateImage() {
+  return Word.run(async (context) => {
+    const wrapperDiv = document.getElementById("graph");
+    const inputSyntax = document.getElementById("mermaid-input").value.trim();
+    document.getElementById("errors").innerText = "";
+    try {
+      const { svg } = await mermaid.render("graphDiv", inputSyntax);
+      wrapperDiv.innerHTML = svg;
+      const pngBase64 = await getBase64Png();
+      const encoded = toBase64(inputSyntax);
+      const newImage = metadataPNG.savetEXt(toUint8Array(pngBase64), `mermaid:${encoded}`);
+      const newBase64 = fromUint8Array(newImage);
+      context.document.body.insertInlinePictureFromBase64(newBase64, Word.InsertLocation.end);
+    } catch (error) {
+      document.getElementById("errors").innerText = error.toString();
+      console.log(error);
+    }
+    await context.sync();
+  });
+}
 
 const getSvgElement = () => {
   const svgElement = document.querySelector("#graph svg")?.cloneNode(true) as HTMLElement;
@@ -56,14 +107,3 @@ const getBase64Png = () => {
     });
   });
 };
-
-export async function run() {
-  return Word.run(async (context) => {
-    const wrapperDiv = document.getElementById("graph");
-    const { svg } = await mermaid.render("graphDiv", "graph TB\n AA-->BB\n AA-->CC");
-    wrapperDiv.innerHTML = svg;
-    const png = await getBase64Png();
-    context.document.body.insertInlinePictureFromBase64(png, Word.InsertLocation.end);
-    await context.sync();
-  });
-}
