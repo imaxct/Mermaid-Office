@@ -33,7 +33,6 @@ const GenerateImage = async () => {
       context.document.getSelection().insertInlinePictureFromBase64(newBase64, Word.InsertLocation.replace);
     } catch (error) {
       document.getElementById("errors").innerText = error.toString();
-      console.log(error);
     }
     await context.sync();
   });
