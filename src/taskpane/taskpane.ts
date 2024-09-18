@@ -6,46 +6,19 @@
 /* global document, Office, Word */
 
 import mermaid from "mermaid";
-import { toBase64, toUint8Array, fromUint8Array } from "js-base64";
+import { toBase64, toUint8Array, fromUint8Array, fromBase64 } from "js-base64";
 import { metadataPNG } from "./metadataPNG";
-
-let eventContexts = [];
 
 Office.onReady(async (info) => {
   if (info.host === Office.HostType.Word) {
     document.getElementById("errors").innerText = "";
     mermaid.initialize({ startOnLoad: false });
     document.getElementById("insert-image").onclick = GenerateImage;
-    document.getElementById("addEvent").onclick = RegisterEventListener;
-    await RegisterEventListener();
+    await ExtractMermaidFromSelection();
   }
 });
 
-async function RegisterEventListener() {
-  await Word.run(async (context) => {
-    const contentControls = context.document.contentControls;
-    contentControls.load("items");
-    await context.sync();
-    if (contentControls.items.length === 0) {
-      console.log("Zero items");
-      return;
-    }
-
-    for (let i = 0; i < contentControls.items.length; i++) {
-      eventContexts[i] = contentControls.items[i].onSelectionChanged.add(imageSelectionChange);
-    }
-
-    await context.sync();
-  });
-}
-
-async function imageSelectionChange(event: Word.ContentControlSelectionChangedEventArgs) {
-  await Word.run(async (context) => {
-    console.log(event);
-  });
-}
-
-export async function GenerateImage() {
+const GenerateImage = async () => {
   return Word.run(async (context) => {
     const wrapperDiv = document.getElementById("graph");
     const inputSyntax = document.getElementById("mermaid-input").value.trim();
@@ -57,14 +30,39 @@ export async function GenerateImage() {
       const encoded = toBase64(inputSyntax);
       const newImage = metadataPNG.savetEXt(toUint8Array(pngBase64), `mermaid:${encoded}`);
       const newBase64 = fromUint8Array(newImage);
-      context.document.body.insertInlinePictureFromBase64(newBase64, Word.InsertLocation.end);
+      context.document.getSelection().insertInlinePictureFromBase64(newBase64, Word.InsertLocation.replace);
     } catch (error) {
       document.getElementById("errors").innerText = error.toString();
       console.log(error);
     }
     await context.sync();
   });
-}
+};
+
+const ExtractMermaidFromSelection = async () => {
+  return Word.run(async (context) => {
+    const selection = context.document.getSelection().load();
+    await context.sync();
+    const pictures = selection.inlinePictures.load();
+    await context.sync();
+    for (let i = 0; i < pictures.items.length; i++) {
+      const base64Src = pictures.items[i].getBase64ImageSrc();
+      await context.sync();
+      const imageBytes = toUint8Array(base64Src.value);
+      if (metadataPNG.isPNG(imageBytes)) {
+        const textChunk = metadataPNG.gettEXt(imageBytes);
+        if (textChunk === undefined || !textChunk.startsWith("mermaid:")) {
+          continue;
+        }
+        const mermaidCodeBase64 = textChunk.replace("mermaid:", "");
+        const mermaidCode = fromBase64(mermaidCodeBase64);
+        document.getElementById("mermaid-input").value = mermaidCode;
+        pictures.items[i].select();
+        break;
+      }
+    }
+  });
+};
 
 const getSvgElement = () => {
   const svgElement = document.querySelector("#graph svg")?.cloneNode(true) as HTMLElement;
